@@ -7,6 +7,7 @@ import PromiseQueue from 'promise-queue'
 import type Application from '../../../application.js'
 import type { MinecraftRawChatEvent } from '../../../common/application-event.js'
 import { ChannelType, Color, MinecraftSendChatPriority } from '../../../common/application-event.js'
+import { Status } from '../../../common/connectable-instance.js'
 import type EventHelper from '../../../common/event-helper.js'
 import SubInstance from '../../../common/sub-instance.js'
 import type UnexpectedErrorHandler from '../../../common/unexpected-error-handler.js'
@@ -148,6 +149,9 @@ export default class GameTogglesHandler extends SubInstance<MinecraftInstance, C
   }
 
   private async sendToggles(config: GameToggleConfig): Promise<void> {
+    // timers outlive the client session. Do not send anything once the client has disconnected
+    if (this.clientInstance.currentStatus() !== Status.Connected) return
+
     if (this.sentCommands > 0) {
       this.logger.warn('Commands are already queued for game-toggles-handler. Skipping this loop')
       return

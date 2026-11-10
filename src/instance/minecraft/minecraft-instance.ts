@@ -347,7 +347,7 @@ export default class MinecraftInstance extends ConnectableInstance implements Di
   }
 
   private sendNow(message: string) {
-    if (this.clientSession?.client.state === states.PLAY) {
+    if (this.clientSession?.isActive() === true && this.clientSession.client.state === states.PLAY) {
       this.logger.debug(`Sending message now: ${message}`)
       this.clientSession.client.chat(message)
     } else {

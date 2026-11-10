@@ -15,6 +15,7 @@ export default class ClientSession {
   silentQuit = false
 
   private destroyed = false
+  private ended = false
 
   constructor(client: Client) {
     this.client = client
@@ -23,6 +24,12 @@ export default class ClientSession {
     this.prismChat = PrismarineChat(this.registry)
     this.indexedData = MinecraftData(client.version)
 
+    // minecraft-protocol never resets client.state after the connection closes,
+    // so track it here to know when the client can no longer send anything
+    client.once('end', () => {
+      this.ended = true
+    })
+
     this.listenForRegistry(client)
     this.listenForSettings(client)
     this.listenForResourcePacks(client)
@@ -30,6 +37,10 @@ export default class ClientSession {
 
   public isDestroyed(): boolean {
     return this.destroyed
+  }
+
+  public isActive(): boolean {
+    return !this.destroyed && !this.ended
   }
 
   public destroy(): void {
