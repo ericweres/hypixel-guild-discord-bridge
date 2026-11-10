@@ -36,6 +36,17 @@ export class DiscordHandler extends SubInstance<MinecraftStatus, void> {
   private static readonly PermissionToView = Permission.Helper
   private static readonly EntriesPerPage = 5
   private static readonly DetailsButtonId = 'show-instance-details'
+  /*
+   * How many of the latest channel messages count as "still visible".
+   * An authentication message older than that gets a new message instead of an edit.
+   */
+  private static readonly RecentMessagesLimit = 5
+
+  /*
+   * Latest message ids per channel, oldest first.
+   * Seeded once from the channel history, then kept up to date with "messageCreate" events.
+   */
+  private readonly recentMessages = new Map<string, string[]>()
 
   constructor(
     application: Application,
@@ -59,6 +70,17 @@ export class DiscordHandler extends SubInstance<MinecraftStatus, void> {
             this.errorHandler.promiseCatch('handling "show details" button in an instance status message.')
           )
         }
+      }
+    })
+
+    client.on('messageCreate', (message) => {
+      // only track channels that have been checked before
+      const recent = this.recentMessages.get(message.channelId)
+      if (recent === undefined) return
+
+      recent.push(message.id)
+      if (recent.length > DiscordHandler.RecentMessagesLimit) {
+        recent.splice(0, recent.length - DiscordHandler.RecentMessagesLimit)
       }
     })
 
@@ -187,6 +209,18 @@ export class DiscordHandler extends SubInstance<MinecraftStatus, void> {
       const result = await this.createMessage(event, channel.id)
       if (result === undefined) continue
 
+      // A new authentication code normally edits the previous authentication message.
+      // If that message has been buried under newer messages, nobody notices the new code.
+      // Post it as a reply instead, so it shows at the bottom of the channel.
+      if (
+        event.message?.type === InstanceMessageType.MinecraftAuthenticationCode &&
+        result.lastMessageId !== undefined &&
+        !(await this.isRecentMessage(channel, result.lastMessageId))
+      ) {
+        result.replyMessageId = result.lastMessageId
+        result.lastMessageId = undefined
+      }
+
       const message = await this.privateEditOrSend(
         event,
         result.payload,
@@ -203,6 +237,26 @@ export class DiscordHandler extends SubInstance<MinecraftStatus, void> {
         messageId: message.id
       })
     }
+  }
+
+  private async isRecentMessage(channel: SendableChannels, messageId: string): Promise<boolean> {
+    let recent = this.recentMessages.get(channel.id)
+
+    if (recent === undefined) {
+      // Only check the channel history once. "messageCreate" events keep it up to date afterwards.
+      // Without the permission to read history, start empty and rely on the events alone.
+      const fetched = await channel.messages.fetch({ limit: DiscordHandler.RecentMessagesLimit }).catch(() => undefined)
+
+      recent =
+        fetched === undefined
+          ? []
+          : [...fetched.values()]
+              .toSorted((a, b) => a.createdTimestamp - b.createdTimestamp)
+              .map((message) => message.id)
+      this.recentMessages.set(channel.id, recent)
+    }
+
+    return recent.includes(messageId)
   }
 
   private async privateEditOrSend(
